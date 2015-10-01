@@ -58,3 +58,7 @@ help              print this text
 help `command`    print specific command information
 sh                execute shell command
 shell             execute shell command
+
+OTHER
+1. line feed
+\r\n
