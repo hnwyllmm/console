@@ -1,0 +1,60 @@
+BUILD
+just text `make'
+
+NOTE
+only linux support
+test platform: Linux 3.19.0 64bit, gcc 4.8.4
+
+HOW TO USE
+please reference main.cpp
+
+DEV
+derive from class command_handler and use console::register_handler to add a 
+handler, implement interfaces:
+1. handle
+prototype:
+int  handle(std::string &command, command_args &args, stringlist &output);
+
+use command_handler::receive to define whether the command given should be 
+handled(that `command' in list which command_handler::add_cmd) like 
+if (!receive(args.front().c_str()))
+    return CMD_NOT_HANDLED;
+	
+return value:
+CMD_SUCCESS			handled success
+CMD_NOT_HANDLED		not handled
+CMD_DISCARD			will not be handled by other command
+CMD_EXIT			exit console
+CMD_REHANDLE		rehandle by command list
+
+2. help
+prototype:
+void help(const command_args &args, helplist_t &output) const;
+just print help information
+
+FEATURES
+1. command complete
+you can use command_handler::add_cmd to add a command to tell `console' someone
+will handle a command. When you type a `table' in console, console will attempt
+to find the best match command text. If there are more than one command, it 
+will print all of them.
+
+2. up and down arrow
+If you type up or down arrow, console will replace current input(or null) with 
+history command.
+
+3. Ctrl + C
+It will be discard if some text were input or exit console if nothing input 
+when got a `Ctrl C'
+
+4. embedded commands
+history           print history command
+!!                execute last command
+!'index'          execute history command specified by index
+exit              exit console
+quit              exit console
+bye               exit console
+help              print this text
+help `command`    print specific command information
+sh                execute shell command
+shell             execute shell command
