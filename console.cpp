@@ -608,12 +608,189 @@ public:
         return ;
 	}
 };
+
 ///////////////////////////////////////////////////////////////////////////////
+// class command_record
+class command_record : public command_handler
+{
+public:
+	command_record(console *c) : command_handler(c), m_fd(-1)
+	{
+		add_cmd("record") ;
+	}
+	~command_record()
+	{
+		if (m_fd > 0)
+		{
+			close(m_fd) ;
+			m_fd = -1 ;
+		}
+	}
+
+	int handle(string &command, command_args &args, stringlist &output)
+	{
+		if (!receive(args.front().c_str()))
+		{
+			if (m_fd < 0 && m_filename.empty())
+			{
+				return CMD_NOT_HANDLED ;
+			}
+
+			if (m_fd < 0)
+			{
+				m_fd = open(m_filename.c_str(), O_CREAT|O_WRONLY, 0644) ;
+				if (m_fd < 0)
+				{
+					trace("open file failure: %d %s, filename %s\r\n",
+							errno, strerror(errno), m_filename.c_str()) ;
+					return CMD_NOT_HANDLED ;
+				}
+				lseek(m_fd, 0, SEEK_END) ;
+			}
+
+			stringlist::const_iterator itstr = output.begin() ;
+			stringlist::const_iterator itend = output.end() ;
+			for ( ; itstr != itend ; ++itstr)
+			{
+				dprintf(m_fd, "%s\r\n", itstr->c_str()) ;
+			}
+
+			return CMD_NOT_HANDLED ;
+		}
+
+		static const char *default_log = "record.dat" ;
+		const char *param = default_log ;
+		if (args.size() > 1)
+			param = (*++args.begin()).c_str() ;
+
+		if (0 == strcasecmp("off", param))
+		{
+			if (m_fd > 0)
+			{
+				close(m_fd) ;
+				m_fd = -1 ;
+			}
+		}
+		else if (0 == strcasecmp("on", param))
+		{
+			if (m_fd > 0)
+				return CMD_SUCCESS ;
+
+			if (m_filename.empty())
+				m_filename = default_log ;
+		}
+		else
+		{
+			if (m_fd > 0 && 0 != strcmp(m_filename.c_str(), param))
+			{
+				close(m_fd) ;
+				m_fd = -1 ;
+				m_filename = param ;
+			}
+			if (0 != strcmp(m_filename.c_str(), param))
+				m_filename = param ;
+		}
+
+		return CMD_SUCCESS ;
+	}
+	void help(const command_args &args, helplist_t &output) const
+	{
+		if (!args.empty() && !receive(args.front().c_str()))
+			return ;
+
+		static helptext_t record(string("record"),
+				string("set record file") ) ;
+		output.push_back(record) ;
+	}
+
+private:
+	int		m_fd ;
+	string	m_filename ;
+};
+///////////////////////////////////////////////////////////////////////////////
+// class command_normal
+command_normal::command_normal(console *c,
+		const char *cmd,
+		const command_callback &cb,
+		const char *helptext /*= "" */)
+	: command_handler(c),
+	m_cb(cb),
+	m_helptext(string(cmd), string(helptext ? helptext : ""))
+{
+	add_cmd(cmd) ;
+}
+
+int command_normal::handle(std::string &command, command_args &args, stringlist &output)
+{
+	if (!receive(args.front().c_str()))
+		return CMD_NOT_HANDLED ;
+
+	const bool res = m_cb(args, output) ;
+	return res ? CMD_SUCCESS : CMD_DISCARD ;
+}
+
+void command_normal::help(const command_args &args, helplist_t &output) const
+{
+	if (!args.empty() && !receive(args.front().c_str()))
+		return ;
+
+	output.push_back(m_helptext) ;
+}
+///////////////////////////////////////////////////////////////////////////////
+//
+class command_echo : public command_callback
+{
+public:
+	command_echo(console *c) : m_console(c)
+	{}
+
+	virtual bool operator()(const command_args &args, stringlist &output) const
+	{
+		const char *param = "on" ;
+		if (args.size() > 1)
+			param = (*++args.begin()).c_str() ;
+
+		if (0 == strcasecmp("off", param))
+		{
+			m_console->set_echo(false) ;
+			output.push_back("echo off") ;
+		}
+		else
+		{
+			m_console->set_echo(true) ;
+			output.push_back("echo on") ;
+		}
+
+		return true ;
+	}
+private:
+	console *m_console ;
+};
+
+class command_register_helper : public command_callback
+{
+public:
+	command_register_helper(callback_t cb) :
+		m_cb(cb)
+	{
+	}
+	bool operator()(const command_args &args, stringlist &output) const
+	{
+		return m_cb(args, output) ;
+	}
+
+private:
+	callback_t	m_cb ;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+// ----------------------------------------------------------------------------
 console::console() :
 	m_output(stdout),
 	m_input(NULL),
 	m_running(false),
-	m_cmd_history(NULL)
+	m_cmd_history(NULL),
+	m_echo(true)
 {
 	m_not_supported = "command can not be handled, text \'help\' "
 		"to get supported commands\r\n" ;
@@ -623,6 +800,12 @@ console::console() :
 	m_cmd_handlers.push_back(new command_exit(this)) ;
 	m_cmd_handlers.push_back(new command_help(this)) ;
 	m_cmd_handlers.push_back(new command_shell(this)) ;
+
+	static command_echo cmdecho(this) ;
+	m_cmd_handlers.push_back(new command_normal(this, "echo", cmdecho, "set echo on/off")) ;
+
+	m_cmd_handlers.push_back(new command_record(this)) ;
+	m_itr_postproc = --m_cmd_handlers.end() ;
 
 	set_input(stdin) ;
 }
@@ -658,14 +841,25 @@ void console::set_input(FILE *input)
 		const int fd = fileno(m_input) ;
 		tcgetattr(fd, &m_input_bakter);
 		struct termios newter = m_input_bakter ;
+		/*
+		newter.c_lflag &= ~(ECHO) ;
+		newter.c_lflag |= IGNCR ;
+		newter.c_lflag &= ~ICANON ;
+		newter.c_cc[VMIN] = 1 ;
+		//newter.c_lflag |= ECHOE|ICANON ;
+		*/
+		//newter.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP
+		//		                | INLCR | IGNCR | ICRNL | IXON);
 		newter.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP
 				                | INLCR | IGNCR | ICRNL | IXON);
 		newter.c_oflag &= ~OPOST;
+		//newter.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
 		newter.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
 		newter.c_cflag &= ~(CSIZE | PARENB);
 		newter.c_cflag |= CS8;
 
 		tcsetattr(fd, TCSANOW, &newter) ;
+
 		setbuf(m_input, NULL) ;
 	}
 }
@@ -777,6 +971,7 @@ bool console::read_command(string &command)
 	string output_buf ;
 
 	char buf ;
+	//setvbuf(m_input, &buf, _IOFBF, 1) ;
 	int fd = fileno(m_input) ;
 	int history_index = -1 ;
 	bool read_ok = true ;
@@ -790,6 +985,7 @@ bool console::read_command(string &command)
 
 		bool over = false ;
 
+	//	int c = fgetc(m_input) ;
 		int c = 0 ;
 		const int res = read(fd, &c, sizeof(c)) ;
 		if (EOF == c)
@@ -915,6 +1111,8 @@ bool console::read_command(string &command)
 			comp.conclusion(match) ;
 
 			const int len = command.size() ;
+			//output(KEY_BACK) ;
+			//output(tmp.c_str() + len) ;
 			output_buf.append(command.size(), KEY_BACK) ;
 			command = match ;
 			output_buf.append(command) ;
@@ -962,6 +1160,13 @@ output_char:
 		output(output_buf) ;
 
 		supp.clear() ;
+		/*
+		if (false == supp.empty())
+		{
+			output(supp) ;
+		}
+		*/
+
 		if (over)
 		{
 			goto out ;
@@ -975,13 +1180,19 @@ out:
 
 void console::output(const char c) const
 {
-	fprintf(m_output, "%c", c) ;
-	fflush(m_output) ;
+	if (m_echo)
+	{
+		fprintf(m_output, "%c", c) ;
+		fflush(m_output) ;
+	}
 }
 void console::output(const char *text) const
 {
-	fprintf(m_output, "%s", text) ;
-	fflush(m_output) ;
+	if (m_echo)
+	{
+		fprintf(m_output, "%s", text) ;
+		fflush(m_output) ;
+	}
 }
 
 void console::output(const std::string &text) const
@@ -991,19 +1202,25 @@ void console::output(const std::string &text) const
 
 void console::output(const stringlist &strlist, const char *split /* = "\r\n" */) const
 {
-	stringlist::const_iterator itstr = strlist.begin() ;
-	stringlist::const_iterator itend = strlist.end() ;
-	for ( ; itstr != itend ; ++itstr)
+	if (m_echo)
 	{
-		output(*itstr) ;
-		output(split) ;
+		stringlist::const_iterator itstr = strlist.begin() ;
+		stringlist::const_iterator itend = strlist.end() ;
+		for ( ; itstr != itend ; ++itstr)
+		{
+			output(*itstr) ;
+			output(split) ;
+		}
 	}
 }
 
 void console::outputln(const char *text) const
 {
-	fprintf(m_output, "%s\r\n", text) ;
-	fflush(m_output) ;
+	if (m_echo)
+	{
+		fprintf(m_output, "%s\r\n", text) ;
+		fflush(m_output) ;
+	}
 }
 
 void console::outputln(const std::string &text) const
@@ -1016,3 +1233,12 @@ const std::list<command_handler *> &console::get_handler_list() const
 	return m_cmd_handlers ;
 }
 
+void console::register_handler(command_handler *handler)
+{
+	m_cmd_handlers.insert(m_itr_postproc, handler) ;
+}
+
+void console::register_handler(const char *cmd, callback_t cb, const char *helptext /* = "" */)
+{
+	m_cmd_handlers.insert(m_itr_postproc, new command_normal(this, cmd, command_register_helper(cb), helptext)) ;
+}

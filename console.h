@@ -11,6 +11,8 @@ typedef std::pair<std::string, std::string>		helptext_t ;
 typedef std::list<helptext_t>	helplist_t ;
 typedef std::list<std::string>	command_args ;
 
+typedef bool (*callback_t)(const command_args &args, stringlist &output) ;
+
 class console ;
 
 class complete_helper
@@ -65,6 +67,27 @@ private:
 	stringlist	m_cmdlist ;
 };
 
+class command_callback
+{
+public:
+	virtual bool operator()(const command_args &args, stringlist &output) const
+	{
+	}
+};
+
+class command_normal : public command_handler
+{
+public:
+	command_normal(console *c, const char *cmd, const command_callback &cb, const char *helptext = "") ;
+
+	virtual int	 handle(std::string &command, command_args &args, stringlist &output) ;
+	virtual void help(const command_args &args, helplist_t &output) const ;
+
+private:
+	const command_callback &		m_cb ;
+	helptext_t						m_helptext ;
+};
+
 class command_history ;
 class console
 {
@@ -77,13 +100,18 @@ public:
 	void set_exit_text(const char *exit) {m_exit_text = exit ;}
 	void set_not_supported(const char *not_supported) 
 			{ m_not_supported = not_supported ; }
+	void set_echo(bool on) {m_echo = on ; }
+
+	bool get_echo() const {return m_echo ; }
 
 	void set_output(FILE *fp) {m_output = fp ; setbuf(m_output, NULL) ;}
 	void set_input(FILE *fp) ; 
 	FILE *get_output() const {return m_output ;}
 	FILE *get_input() const {return m_input ; }
 	
-	void register_handler(command_handler &handler) ;
+	void register_handler(command_handler *handler) ;
+	void register_handler(const char *cmd, callback_t cb, const char *helptext = "") ;
+
 	bool start() ;
 	void stop() ;
 
@@ -108,12 +136,16 @@ private:
 	struct termios	m_input_bakter ;
 
 	bool		m_running ;
+
+	bool		m_echo ;
+
 	std::string	m_header ;
 	std::string	m_title ;			// output before read command
 	std::string	m_exit_text ;
 	std::string	m_not_supported ;
 
-	std::list<command_handler *>		m_cmd_handlers;
+	std::list<command_handler *>			m_cmd_handlers;
+	std::list<command_handler *>::iterator	m_itr_postproc ;
 
 	command_history *m_cmd_history ;
 };

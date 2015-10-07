@@ -62,3 +62,6 @@ shell             execute shell command
 OTHER
 1. line feed
 \r\n
+
+2. echo on/off
+3. record output
