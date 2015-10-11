@@ -823,20 +823,27 @@ console::~console()
 		fclose(m_output) ;
 	if (m_input)
 	{
-		tcsetattr(fileno(m_input), TCSANOW, &m_input_bakter) ;
+		if (stdin == m_input)
+			tcsetattr(fileno(m_input), TCSANOW, &m_input_bakter) ;
+
 		fclose(m_input) ;
 	}
 }
 
-void console::set_input(FILE *input)
+int console::set_input(FILE *input)
 {
 	if (input != m_input)
 	{
 		if (m_input)
 		{
-			tcgetattr(fileno(m_input), &m_input_bakter) ;
+			if (stdin == m_input)
+				tcsetattr(fileno(m_input), TCSANOW, &m_input_bakter) ;
+			else
+				fclose(m_input) ;
 		}
 		m_input = input ;
+		if (stdin != m_input)
+			return 0 ;
 
 		const int fd = fileno(m_input) ;
 		tcgetattr(fd, &m_input_bakter);
@@ -862,7 +869,20 @@ void console::set_input(FILE *input)
 
 		setbuf(m_input, NULL) ;
 	}
+	return 0 ;
 }
+
+int console::set_input(const char *file)
+{
+	FILE *fp = fopen(file, "rb") ;
+	if (!fp)
+	{
+		trace("[set_input] can not open file: %s\r\n", file) ;
+		return -1 ;
+	}
+	return set_input(fp) ;
+}
+
 bool console::start()
 {
 	m_running = true ;
@@ -978,12 +998,16 @@ bool console::read_command(string &command,
 	int fd = fileno(m_input) ;
 	int history_index = -1 ;
 	bool read_ok = true ;
+	const bool is_stdin = m_input == stdin ;
 
 	int cursor_pos = command.size() ;
-	if (title)
-		output(title) ;
-	else
-		output(m_title) ;
+	if (is_stdin)
+	{
+		if (title)
+			output(title) ;
+		else
+			output(m_title) ;
+	}
 
 	while (true)
 	{
@@ -994,7 +1018,8 @@ bool console::read_command(string &command,
 
 	//	int c = fgetc(m_input) ;
 		int c = 0 ;
-		const int res = read(fd, &c, sizeof(c)) ;
+		const int readlen = is_stdin ? sizeof(c) : 1 ;
+		const int res = read(fd, &c, readlen) ;
 		if (EOF == c)
 		{
 			trace("got a EOF\r\n") ;
@@ -1014,6 +1039,9 @@ bool console::read_command(string &command,
 				goto output_char ;
 
 			if (handler)
+				goto output_char ;
+
+			if (!is_stdin)
 				goto output_char ;
 
 			switch(c)
@@ -1064,6 +1092,9 @@ bool console::read_command(string &command,
 		if (KEY_CTRLC == c)
 		{
 			trace("read_command: ctrl+c\r\n") ;
+			if (!is_stdin)
+				goto output_char ;
+
 			if (false == command.empty() && echo < 0)
 			{
 				read_ok = false ;
@@ -1080,6 +1111,9 @@ bool console::read_command(string &command,
 		if (KEY_BACK == c)
 		{
 			trace("read_command: back space, cursor_pos is %d\r\n", cursor_pos) ;
+			if (!is_stdin)
+				goto output_char ;
+
 			if (cursor_pos > 0)
 			{
 				can_replace = false ;
@@ -1119,6 +1153,9 @@ bool console::read_command(string &command,
 				goto output_char ;
 
 			if (handler)
+				goto output_char ;
+
+			if (!is_stdin)
 				goto output_char ;
 
 			has_space = false ;

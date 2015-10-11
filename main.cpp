@@ -11,5 +11,10 @@ int main(void)
 	con.set_exit_text("Bye") ;
 	con.register_handler(new command_test(&con)) ;
 	con.start() ;
+
+	printf("console exit first\r\n") ;
+
+	con.set_input("test.cmd") ;
+	con.start() ;
 	return 0 ;
 }

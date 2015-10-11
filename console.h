@@ -108,7 +108,8 @@ public:
 	bool get_echo() const {return m_echo ; }
 
 	void set_output(FILE *fp) {m_output = fp ; setbuf(m_output, NULL) ;}
-	void set_input(FILE *fp) ; 
+	int  set_input(FILE *fp) ; 
+	int  set_input(const char *file) ;
 	FILE *get_output() const {return m_output ;}
 	FILE *get_input() const {return m_input ; }
 	

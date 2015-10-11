@@ -65,3 +65,4 @@ OTHER
 
 2. echo on/off
 3. record output
+4. read command from file like shell file

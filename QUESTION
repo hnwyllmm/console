@@ -19,7 +19,7 @@ history不支持!+命令前缀					Y
 command handler读取输入					Y
 command handler读取密码模式输入			Y
 
-区别处理控制台输入和文件输入命令
+区别处理控制台输入和文件输入命令		Y
 
 command hander支持处理参数，如-c --host等
 
