@@ -78,7 +78,10 @@ public:
 class command_normal : public command_handler
 {
 public:
-	command_normal(console *c, const char *cmd, const command_callback &cb, const char *helptext = "") ;
+	command_normal(console *c, 
+			const char *cmd, 
+			const command_callback &cb, 
+			const char *helptext = "") ;
 
 	virtual int	 handle(std::string &command, command_args &args, stringlist &output) ;
 	virtual void help(const command_args &args, helplist_t &output) const ;
@@ -124,8 +127,12 @@ public:
 
 	const std::list<command_handler *> &get_handler_list() const ;
 
+	bool read_command(std::string &command, 
+			const char *title = NULL,
+			char echo = -1, 
+			command_handler *handler = NULL) const ;
+
 protected:
-	bool read_command(std::string &command) ;
 	bool run() ;
 
 private:

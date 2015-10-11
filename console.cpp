@@ -13,7 +13,7 @@ using namespace std ;
 
 ///////////////////////////////////////////////////////////////////////////////
 // 
-int	trace_flag = 0 ;
+int	trace_flag = 1 ;
 FILE *g_trace_file = NULL ;
 const char *trace_file = "console.log" ;
 
@@ -955,7 +955,10 @@ int console::read_char(int fd) const
 	}
 }
 
-bool console::read_command(string &command)
+bool console::read_command(string &command, 
+		const char *title /*= NULL */,
+		char echo /* = -1 */, 
+		command_handler *handler /* = NULL */) const
 {
 	const int KEY_CTRLC		= 3 ;			// Ctrl + C
 	const int KEY_BACK 		= 8;
@@ -977,13 +980,17 @@ bool console::read_command(string &command)
 	bool read_ok = true ;
 
 	int cursor_pos = command.size() ;
-	output(m_title) ;
+	if (title)
+		output(title) ;
+	else
+		output(m_title) ;
 
 	while (true)
 	{
 		output_buf.clear() ;
 
 		bool over = false ;
+		bool can_replace = true ;
 
 	//	int c = fgetc(m_input) ;
 		int c = 0 ;
@@ -1003,6 +1010,12 @@ bool console::read_command(string &command)
 		if (isspecial(c))
 		{
 			trace("read_command: special char\r\n") ;
+			if (echo >= 0)	// no echo or special char
+				goto output_char ;
+
+			if (handler)
+				goto output_char ;
+
 			switch(c)
 			{
 			case KEY_UP:
@@ -1051,13 +1064,14 @@ bool console::read_command(string &command)
 		if (KEY_CTRLC == c)
 		{
 			trace("read_command: ctrl+c\r\n") ;
-			if (false == command.empty())
+			if (false == command.empty() && echo < 0)
 			{
 				read_ok = false ;
 			}
 				
 			command.clear() ;
 			output_buf.append("\r\n") ;
+			can_replace = false ;
 
 			over = true ;
 			goto output_char ;
@@ -1068,6 +1082,7 @@ bool console::read_command(string &command)
 			trace("read_command: back space, cursor_pos is %d\r\n", cursor_pos) ;
 			if (cursor_pos > 0)
 			{
+				can_replace = false ;
 				assert(false == command.empty()) ;
 				command.erase(--cursor_pos, 1) ;
 				trace("command is \"%s\"\r\n", command.c_str());
@@ -1084,6 +1099,7 @@ bool console::read_command(string &command)
 		{
 			trace("read_command: key return\r\n") ;
 			over = true ;
+			can_replace = false ;
 
 			output_buf.append("\r\n") ;
 			goto output_char ;
@@ -1092,27 +1108,35 @@ bool console::read_command(string &command)
 		if ('\t' == c)
 		{
 			trace("read_command: table, command is \"%s\"\r\n", command.c_str()) ;
-			bool has_space = false ;
-			const int size = command.size();
+			bool has_space ;
+			int size ;
 			int i = 0 ;
+			std::list<command_handler *>::const_iterator itcmd, itend ;
+			string match ;
+			complete_helper comp(command) ;
+
+			if (echo >= 0)
+				goto output_char ;
+
+			if (handler)
+				goto output_char ;
+
+			has_space = false ;
+			size = command.size() ;
+			i = 0 ;
 			for ( ; i < size &&  isspace(command[i]) ; i++) ;
 			for ( ; i < size && !isspace(command[i]) ; i++) ;
 			if (i < size)
 				goto output_char ;
 
-			complete_helper comp(command) ;
-			string match ;
-			std::list<command_handler *>::iterator itcmd = m_cmd_handlers.begin() ;
-			std::list<command_handler *>::iterator itend = m_cmd_handlers.end() ;
+			itcmd = m_cmd_handlers.begin() ;
+			itend = m_cmd_handlers.end() ;
 			for ( ; itcmd != itend ; ++itcmd)
 			{
 				(*itcmd)->complete(comp) ;
 			}
 			comp.conclusion(match) ;
 
-			const int len = command.size() ;
-			//output(KEY_BACK) ;
-			//output(tmp.c_str() + len) ;
 			output_buf.append(command.size(), KEY_BACK) ;
 			command = match ;
 			output_buf.append(command) ;
@@ -1157,6 +1181,11 @@ bool console::read_command(string &command)
 		trace("not handled\r\n") ;
 
 output_char:
+		if (0 == echo)
+			output_buf.clear() ;
+		else if (echo > 0 && can_replace)
+			output_buf.replace(0, output_buf.size(), output_buf.size(), echo) ;
+
 		output(output_buf) ;
 
 		supp.clear() ;
